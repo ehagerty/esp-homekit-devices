@@ -1417,6 +1417,55 @@ static void free_wifi_config_ip_info() {
     ip_addr.addr = 0;
     gw_addr.addr = 0;
 }
+
+
+// DEBUG: To check Wifi Auth
+/*
+static void on_wifi_connect(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+    wifi_event_sta_connected_t* event = (wifi_event_sta_connected_t*) event_data;
+    switch (event->authmode) {
+        case WIFI_AUTH_OPEN:
+            INFO("Wifi Auth: WIFI_AUTH_OPEN");
+            break;
+        case WIFI_AUTH_OWE:
+            INFO("Wifi Auth: WIFI_AUTH_OWE");
+            break;
+        case WIFI_AUTH_WEP:
+            INFO("Wifi Auth: WIFI_AUTH_WEP");
+            break;
+        case WIFI_AUTH_WPA_PSK:
+            INFO("Wifi Auth: WIFI_AUTH_WPA_PSK");
+            break;
+        case WIFI_AUTH_WPA2_PSK:
+            INFO("Wifi Auth: WIFI_AUTH_WPA2_PSK");
+            break;
+        case WIFI_AUTH_WPA_WPA2_PSK:
+            INFO("Wifi Auth: WIFI_AUTH_WPA_WPA2_PSK");
+            break;
+        case WIFI_AUTH_ENTERPRISE:
+            INFO("Wifi Auth: WIFI_AUTH_ENTERPRISE");
+            break;
+        case WIFI_AUTH_WPA3_PSK:
+            INFO("Wifi Auth: WIFI_AUTH_WPA3_PSK");
+            break;
+        case WIFI_AUTH_WPA2_WPA3_PSK:
+            INFO("Wifi Auth: WIFI_AUTH_WPA2_WPA3_PSK");
+            break;
+        case WIFI_AUTH_WPA3_ENTERPRISE:
+            INFO("Wifi Auth: WIFI_AUTH_WPA3_ENTERPRISE");
+            break;
+        case WIFI_AUTH_WPA2_WPA3_ENTERPRISE:
+            INFO("Wifi Auth: WIFI_AUTH_WPA2_WPA3_ENTERPRISE");
+            break;
+        case WIFI_AUTH_WPA3_ENT_192:
+            INFO("Wifi Auth: WIFI_AUTH_WPA3_ENT_192");
+            break;
+        default:
+            INFO("Wifi Auth: WIFI_AUTH_UNKNOWN");
+            break;
+        }
+}
+*/
     
 static void on_got_ip(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     free_wifi_config_ip_info();
@@ -1430,7 +1479,7 @@ static void on_got_ip(void* arg, esp_event_base_t event_base, int32_t event_id, 
     adv_logger_set_ip_address(buf);
 }
         
-static void on_disconnect(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+static void on_wifi_disconnect(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     ERROR("Wifi disconnected");
     free_wifi_config_ip_info();
     sdk_wifi_station_connect();
@@ -1484,8 +1533,11 @@ void wifi_config_connect(const uint8_t mode, const uint8_t phy, const bool with_
     sysparam_get_string(WIFI_STA_PASSWORD_SYSPARAM, &wifi_password);
     
 #ifdef ESP_PLATFORM
+    // DEBUG: To check Wifi Auth
+    //esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &on_wifi_connect, NULL);
+    
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip, NULL);
-    esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_disconnect, NULL);
+    esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_wifi_disconnect, NULL);
     
     strncpy((char*) sta_config.sta.ssid, wifi_ssid, sizeof(sta_config.sta.ssid) - 1);
     free(wifi_ssid);

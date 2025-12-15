@@ -8,6 +8,8 @@
 #ifndef __HAA_TYPES_H__
 #define __HAA_TYPES_H__
 
+#include "lightbulb_fx.h"
+
 typedef struct _last_state {
     uint8_t ch_type;
     uint16_t ch_state_id;
@@ -232,6 +234,8 @@ typedef struct _lightbulb_group {
     TimerHandle_t timer;
     
     homekit_characteristic_t* ch0;
+    
+    lightbulb_fx_data_t* lightbulb_fx_data;
     
     struct _lightbulb_group* next;
     

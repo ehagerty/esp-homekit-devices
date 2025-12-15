@@ -11,7 +11,7 @@
 #include "../../common/common_headers.h"
 
 // Version
-#define HAA_FIRMWARE_VERSION                "12.15.0"
+#define HAA_FIRMWARE_VERSION                "12.16.0"
 #define HAA_FIRMWARE_BETA_REVISION          ""          // Format: "b01"
 #define HAA_FIRMWARE_CODENAME               "Merlin"
 
@@ -402,6 +402,7 @@
 #define myRGB                               lightbulb_group->rgb
 #define LIGHTBULB_AUTODIMMER_TIMER          ch_group->timer
 #define LIGHTBULB_SET_DELAY_TIMER           lightbulb_group->timer
+#define LIGHTBULB_FX_SET                    "fx"
 
 #define GD_CURRENT_DOOR_STATE               ch_group->ch[0]
 #define GD_TARGET_DOOR_STATE                ch_group->ch[1]
@@ -801,7 +802,7 @@
 #define SETUP_MODE_ACTIVATE_COUNT           "z"
 #define SETUP_MODE_DEFAULT_ACTIVATE_COUNT   (8)
 #define SETUP_MODE_TOGGLE_TIME_MS           (1050)
-#define CUSTOM_HAA_COMMAND                  "nm"
+#define CUSTOM_HAA_COMMAND                  "fx"
 #define CUSTOM_HAA_ADVANCED_COMMAND_LEN     (2)
 #define HAA_SETUP_ACCESSORY_SET             "s"
 

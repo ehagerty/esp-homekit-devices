@@ -178,4 +178,85 @@
     .value = HOMEKIT_STRING_(_value), \
     ##__VA_ARGS__
 
+// HAA LIGHTBULB FX EFFECTS
+#define HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_EFFECT HOMEKIT_CUSTOM_EXTRA_UUID("F0080001")
+#define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_EFFECT(_value, ...) \
+    .type = HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_EFFECT, \
+    .format = HOMEKIT_FORMAT_INT, \
+    .permissions = HOMEKIT_PERMISSIONS_PAIRED_READ \
+            | HOMEKIT_PERMISSIONS_PAIRED_WRITE \
+            | HOMEKIT_PERMISSIONS_NOTIFY \
+            | HOMEKIT_PERMISSIONS_HIDDEN, \
+    .min_value = (float[]) {0}, \
+    .max_value = (float[]) {100}, \
+    .min_step = (float[]) {1}, \
+    .value = HOMEKIT_INT_(_value), \
+    ##__VA_ARGS__
+
+#define HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_SPEED HOMEKIT_CUSTOM_EXTRA_UUID("F0080002")
+#define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_SPEED(_value, ...) \
+    .type = HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_SPEED, \
+    .format = HOMEKIT_FORMAT_INT, \
+    .permissions = HOMEKIT_PERMISSIONS_PAIRED_READ \
+            | HOMEKIT_PERMISSIONS_PAIRED_WRITE \
+            | HOMEKIT_PERMISSIONS_NOTIFY \
+            | HOMEKIT_PERMISSIONS_HIDDEN, \
+    .min_value = (float[]) {0}, \
+    .max_value = (float[]) {100}, \
+    .min_step = (float[]) {1}, \
+    .value = HOMEKIT_INT_(_value), \
+    ##__VA_ARGS__
+
+#define HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_REVERSE HOMEKIT_CUSTOM_EXTRA_UUID("F0080003")
+#define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_REVERSE(_value, ...) \
+    .type = HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_REVERSE, \
+    .format = HOMEKIT_FORMAT_INT, \
+    .permissions = HOMEKIT_PERMISSIONS_PAIRED_READ \
+            | HOMEKIT_PERMISSIONS_PAIRED_WRITE \
+            | HOMEKIT_PERMISSIONS_NOTIFY \
+            | HOMEKIT_PERMISSIONS_HIDDEN, \
+    .min_value = (float[]) {0}, \
+    .max_value = (float[]) {1}, \
+    .min_step = (float[]) {1}, \
+    .value = HOMEKIT_INT_(_value), \
+    ##__VA_ARGS__
+
+#define HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_SIZE HOMEKIT_CUSTOM_EXTRA_UUID("F0080004")
+#define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_SIZE(_value, ...) \
+    .type = HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_SIZE, \
+    .format = HOMEKIT_FORMAT_INT, \
+    .permissions = HOMEKIT_PERMISSIONS_PAIRED_READ \
+            | HOMEKIT_PERMISSIONS_PAIRED_WRITE \
+            | HOMEKIT_PERMISSIONS_NOTIFY \
+            | HOMEKIT_PERMISSIONS_HIDDEN, \
+    .min_value = (float[]) {0}, \
+    .max_value = (float[]) {3}, \
+    .min_step = (float[]) {1}, \
+    .value = HOMEKIT_INT_(_value), \
+    ##__VA_ARGS__
+
+#define HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_COLOR2 HOMEKIT_CUSTOM_EXTRA_UUID("F0080005")
+#define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_COLOR2(_value, ...) \
+    .type = HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_COLOR2, \
+    .format = HOMEKIT_FORMAT_INT, \
+    .permissions = HOMEKIT_PERMISSIONS_PAIRED_READ \
+            | HOMEKIT_PERMISSIONS_PAIRED_WRITE \
+            | HOMEKIT_PERMISSIONS_NOTIFY \
+            | HOMEKIT_PERMISSIONS_HIDDEN, \
+    .min_step = (float[]) {1}, \
+    .value = HOMEKIT_INT_(_value), \
+    ##__VA_ARGS__
+
+#define HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_COLOR3 HOMEKIT_CUSTOM_EXTRA_UUID("F0080006")
+#define HOMEKIT_DECLARE_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_COLOR3(_value, ...) \
+    .type = HOMEKIT_CHARACTERISTIC_CUSTOM_LIGHTBULB_FX_COLOR3, \
+    .format = HOMEKIT_FORMAT_INT, \
+    .permissions = HOMEKIT_PERMISSIONS_PAIRED_READ \
+            | HOMEKIT_PERMISSIONS_PAIRED_WRITE \
+            | HOMEKIT_PERMISSIONS_NOTIFY \
+            | HOMEKIT_PERMISSIONS_HIDDEN, \
+    .min_step = (float[]) {1}, \
+    .value = HOMEKIT_INT_(_value), \
+    ##__VA_ARGS__
+
 #endif  // __HAA_EXTRA_CHARACTERISTICS__
