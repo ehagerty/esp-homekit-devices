@@ -3878,7 +3878,7 @@ void rgbw_set_timer_worker() {
                 while (lightbulb_group) {
                     if (LIGHTBULB_TYPE == LIGHTBULB_TYPE_NRZ && lightbulb_group->gpio[0] == addressled->gpio) {
                         ch_group_t* ch_group = ch_group_find(lightbulb_group->ch0);
-                        const unsigned int lightbulb_fx_must_run = lightbulb_group->lightbulb_fx_data->effect != 0 && ch_group->ch[0]->value.bool_value;
+                        const unsigned int lightbulb_fx_must_run = lightbulb_group->lightbulb_fx_data && lightbulb_group->lightbulb_fx_data->effect != 0 && ch_group->ch[0]->value.bool_value;
                         
                         for (unsigned int p = LIGHTBULB_RANGE_START; p < LIGHTBULB_RANGE_END; p = p + LIGHTBULB_CHANNELS) {
                             for (unsigned int i = 0; i < LIGHTBULB_CHANNELS; i++) {
