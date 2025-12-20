@@ -53,8 +53,6 @@
 
 lightbulb_fx_data_t* current_lightbulb_fx_data = NULL;
 
-#define MAX_NUM_COLORS      (2)
-
 // some common colors
 #define RED        (uint32_t)0xFF0000
 #define GREEN      (uint32_t)0x00FF00
@@ -97,14 +95,6 @@ lightbulb_fx_data_t* current_lightbulb_fx_data = NULL;
 #define SIZE_XLARGE     ((uint8_t) 0b00000110)
 #define SIZE_OPTION     ((current_lightbulb_fx_data->options >> 1) & 3)
 
-// segment runtime options (aux_param2)
-#define FRAME           (uint8_t) 0b10000000
-#define SET_FRAME       (current_lightbulb_fx_data->aux_param2 |=  FRAME)
-#define CLR_FRAME       (current_lightbulb_fx_data->aux_param2 &= ~FRAME)
-#define CYCLE           (uint8_t) 0b01000000
-#define SET_CYCLE       (current_lightbulb_fx_data->aux_param2 |=  CYCLE)
-#define CLR_CYCLE       (current_lightbulb_fx_data->aux_param2 &= ~CYCLE)
-#define CLR_FRAME_CYCLE (current_lightbulb_fx_data->aux_param2 &= ~(FRAME | CYCLE))
 
 lightbulb_fx_data_t* new_lightbulb_fx_data(uint16_t size, uint16_t channels) {
     lightbulb_fx_data_t* lightbulb_fx_data = calloc(1, sizeof(lightbulb_fx_data_t));
@@ -112,7 +102,7 @@ lightbulb_fx_data_t* new_lightbulb_fx_data(uint16_t size, uint16_t channels) {
     lightbulb_fx_data->leds_array_size = size;
     lightbulb_fx_data->channels = channels;
     
-    lightbulb_fx_data->speed = 910;
+    lightbulb_fx_data->speed = 1370;
     
     lightbulb_fx_data->leds_array = calloc(size * channels, sizeof(uint8_t));;
     
@@ -136,19 +126,9 @@ uint32_t get_lightbulb_fx_effect_now_ms() {
     return xTaskGetTickCount() * portTICK_PERIOD_MS;
 }
 
-static void set_next_time(uint32_t delay) {
-    current_lightbulb_fx_data->next_time = get_lightbulb_fx_effect_now_ms() + delay;
+static void set_next_time(const uint32_t delay_ms) {
+    current_lightbulb_fx_data->next_time = get_lightbulb_fx_effect_now_ms() + delay_ms;
 }
-
-static bool WS2812FX_isFrame() {
-    return current_lightbulb_fx_data->aux_param2 & FRAME;
-}
-
-/*
-static bool WS2812FX_isCycle() {
-    return current_lightbulb_fx_data->aux_param2 & CYCLE;
-}
-*/
 
 #ifdef ESP_PLATFORM
 static unsigned int IRAM_ATTR private_abs(int number) {
@@ -171,6 +151,10 @@ static int IRAM_ATTR private_min(int a, int b) {
 }
 
 static void WS2812FX_setPixelColor_5(uint16_t address, uint8_t r, uint8_t g, uint8_t b, uint8_t w) {
+    if (address >= current_lightbulb_fx_data->leds_array_size) {
+        return;
+    }
+    
     const unsigned int led_address_base = address * current_lightbulb_fx_data->channels;
     
     uint8_t color_components[4] = { r, g, b, w };
@@ -197,7 +181,7 @@ static uint8_t WS2812FX_random8() {
 }
 
 static uint8_t WS2812FX_random8_lim(uint8_t lim) {
-    return (uint8_t) WS2812FX_random(0, ((uint32_t) lim) + 1);
+    return (uint8_t) WS2812FX_random(0, lim);
 }
 
 /*
@@ -207,7 +191,7 @@ static uint16_t WS2812FX_random16() {
 */
 
 static uint16_t WS2812FX_random16_lim(uint16_t lim) {
-    return (uint16_t) WS2812FX_random(0, ((uint32_t) lim) + 1);
+    return (uint16_t) WS2812FX_random(0, lim);
 }
 
 /*
@@ -281,18 +265,19 @@ static uint8_t WS2812FX_get_random_wheel_index(uint8_t pos) {
     return r;
 }
 
-static void WS2812FX_copyPixels(uint16_t dest, uint16_t src, uint16_t count) {
-    uint8_t *pixels = current_lightbulb_fx_data->leds_array;
-    uint8_t bytesPerPixel = current_lightbulb_fx_data->channels;
-    
-    memmove(pixels + (dest * bytesPerPixel), pixels + (src * bytesPerPixel), count * bytesPerPixel);
+static void WS2812FX_copyPixels(unsigned int dest, unsigned int src, unsigned int count) {
+    if (dest + count <= current_lightbulb_fx_data->leds_array_size &&
+        src + count <= current_lightbulb_fx_data->leds_array_size) {
+        memmove(current_lightbulb_fx_data->leds_array + (dest * current_lightbulb_fx_data->channels),
+                current_lightbulb_fx_data->leds_array + (src * current_lightbulb_fx_data->channels),
+                count * current_lightbulb_fx_data->channels);
+    }
 }
 
 static uint16_t WS2812FX_blink(uint32_t color1, uint32_t color2, bool strobe) {
     if (current_lightbulb_fx_data->counter_mode_call & 1) {
         uint32_t color = (IS_REVERSE) ? color1 : color2; // off
         WS2812FX_fill(color, 0, current_lightbulb_fx_data->leds_array_size);
-        SET_CYCLE;
         return strobe ? current_lightbulb_fx_data->speed - 20 : (current_lightbulb_fx_data->speed / 2);
         
     } else {
@@ -307,7 +292,7 @@ static uint16_t WS2812FX_color_wipe(uint32_t color1, uint32_t color2, bool rev) 
         uint32_t led_offset = current_lightbulb_fx_data->counter_mode_step;
         
         if (IS_REVERSE) {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - led_offset, color1);
+            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - led_offset, color1);
         } else {
             WS2812FX_setPixelColor_2(led_offset, color1);
         }
@@ -316,17 +301,13 @@ static uint16_t WS2812FX_color_wipe(uint32_t color1, uint32_t color2, bool rev) 
         uint32_t led_offset = current_lightbulb_fx_data->counter_mode_step - current_lightbulb_fx_data->leds_array_size;
         
         if ((IS_REVERSE && !rev) || (!IS_REVERSE && rev)) {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - led_offset, color2);
+            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - led_offset, color2);
         } else {
             WS2812FX_setPixelColor_2(led_offset, color2);
         }
     }
 
     current_lightbulb_fx_data->counter_mode_step = (current_lightbulb_fx_data->counter_mode_step + 1) % (current_lightbulb_fx_data->leds_array_size * 2);
-
-    if (current_lightbulb_fx_data->counter_mode_step == 0) {
-        SET_CYCLE;
-    }
 
     return (current_lightbulb_fx_data->speed / (current_lightbulb_fx_data->leds_array_size * 2));
 }
@@ -341,7 +322,7 @@ static uint8_t* WS2812FX_blend(uint8_t *dest, uint8_t *src1, uint8_t *src2, uint
         memmove(dest, src2, cnt);
         
     } else {
-        for (uint16_t i=0; i<cnt; i++) {
+        for (unsigned int i = 0; i < cnt; i++) {
             // dest[i] = map(blendAmt, 0, 255, src1[i], src2[i]);
             dest[i] =  blendAmt * ((int)src2[i] - (int)src1[i]) / 256 + src1[i]; // map() function
         }
@@ -354,106 +335,6 @@ static uint32_t WS2812FX_color_blend(uint32_t color1, uint32_t color2, uint8_t b
     uint32_t blendedColor;
     WS2812FX_blend((uint8_t*) &blendedColor, (uint8_t*) &color1, (uint8_t*) &color2, sizeof(uint32_t), blendAmt);
     return blendedColor;
-}
-    
-
-static void WS2812FX_scan(uint32_t color1, uint32_t color2, bool dual) {
-    int8_t dir = current_lightbulb_fx_data->aux_param ? -1 : 1;
-    uint8_t size = 1 << SIZE_OPTION;
-    
-    if (size > current_lightbulb_fx_data->leds_array_size) {
-        return;
-    }
-    
-    WS2812FX_fill(color2, 0, current_lightbulb_fx_data->leds_array_size);
-
-    for (unsigned int i = 0; i < size; i++) {
-        if (IS_REVERSE || dual) {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - current_lightbulb_fx_data->counter_mode_step - i, color1);
-        }
-        
-        if (!IS_REVERSE || dual) {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->counter_mode_step + i, color1);
-        }
-    }
-
-    current_lightbulb_fx_data->counter_mode_step += dir;
-    
-    if (current_lightbulb_fx_data->counter_mode_step == 0) {
-        current_lightbulb_fx_data->aux_param = 0;
-        SET_CYCLE;
-    }
-    
-    if (current_lightbulb_fx_data->counter_mode_step >= (uint16_t)(current_lightbulb_fx_data->leds_array_size - size)) {
-        current_lightbulb_fx_data->aux_param = 1;
-    }
-
-    set_next_time(current_lightbulb_fx_data->speed / (current_lightbulb_fx_data->leds_array_size * 2));
-}
-
-static void WS2812FX_tricolor_chase(uint32_t color1, uint32_t color2, uint32_t color3) {
-    uint8_t sizeCnt = 1 << SIZE_OPTION;
-    uint8_t sizeCnt2 = sizeCnt + sizeCnt;
-    uint8_t sizeCnt3 = sizeCnt2 + sizeCnt;
-    uint16_t index = current_lightbulb_fx_data->counter_mode_step % sizeCnt3;
-    
-    for (uint16_t i = 0; i < current_lightbulb_fx_data->leds_array_size; i++, index++) {
-        index = index % sizeCnt3;
-
-        uint32_t color = color3;
-        if (index < sizeCnt) {
-            color = color1;
-        } else if (index < sizeCnt2) {
-            color = color2;
-        }
-
-        if (IS_REVERSE) {
-            WS2812FX_setPixelColor_2(i, color);
-        } else {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - i - 1, color);
-        }
-    }
-    
-    current_lightbulb_fx_data->counter_mode_step++;
-    if (current_lightbulb_fx_data->counter_mode_step % current_lightbulb_fx_data->leds_array_size == 0) {
-        SET_CYCLE;
-    }
-
-    set_next_time(current_lightbulb_fx_data->speed / 16);
-}
-
-static uint8_t WS2812FX_fast_sine8(const uint8_t num) {
-    double x = num;
-    
-    x += -0.3183098861838 * x * (x < 0 ? -x : x);
-    x += +0.3451140202480 * x * (x < 0 ? -x : x);
-    x *= +0.1591549430919;
-    
-    const double tmp = x + 0.5;
-    const int floor = tmp < 0 ? tmp - 1 : tmp;
-    
-    x -= floor;
-    x *= +6.2831853071796;
-    
-    x *= 127;
-    x += 128;
-    
-    return x;
-}
-
-static void WS2812FX_twinkle(uint32_t color1, uint32_t color2) {
-    if (current_lightbulb_fx_data->counter_mode_step == 0) {
-        WS2812FX_fill(color2, 0, current_lightbulb_fx_data->leds_array_size);
-        uint16_t min_leds = (current_lightbulb_fx_data->leds_array_size / 4) + 1; // make sure, at least one LED is on
-        current_lightbulb_fx_data->counter_mode_step = WS2812FX_random(min_leds, min_leds * 2);
-        SET_CYCLE;
-    }
-    
-    WS2812FX_setPixelColor_2(WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size - 1), color1);
-    
-    current_lightbulb_fx_data->counter_mode_step--;
-    
-    set_next_time(current_lightbulb_fx_data->speed / current_lightbulb_fx_data->leds_array_size);
 }
 
 static uint32_t WS2812FX_getPixelColor(uint16_t address) {
@@ -473,52 +354,163 @@ static uint32_t WS2812FX_getPixelColor(uint16_t address) {
 }
 
 static void WS2812FX_fade_out_color(uint32_t targetColor) {
+    /*
     const uint8_t rateMapH[] = { 0, 1, 1, 1, 2, 3, 4, 6 };
     const uint8_t rateMapL[] = { 0, 2, 3, 8, 8, 8, 8, 8 };
     
     uint8_t rate  = FADE_RATE;
     uint8_t rateH = rateMapH[rate];
     uint8_t rateL = rateMapL[rate];
+    */
+    
+    const uint8_t rateH = 1;
+    const uint8_t rateL = 3;
     
     uint32_t color = targetColor;
-    int w2 = (color >> 24) & 0xff;
-    int r2 = (color >> 16) & 0xff;
-    int g2 = (color >>  8) & 0xff;
-    int b2 =  color        & 0xff;
+    int w2 = (color >> 24) & 0xFF;
+    int r2 = (color >> 16) & 0xFF;
+    int g2 = (color >>  8) & 0xFF;
+    int b2 =  color        & 0xFF;
     
-    for (uint16_t i = 0; i < current_lightbulb_fx_data->leds_array_size; i++) {
+    for (unsigned int i = 0; i < current_lightbulb_fx_data->leds_array_size; i++) {
         color = WS2812FX_getPixelColor(i); // current color
         
+        /*
         if (rate == 0) { // old fade-to-black algorithm
             WS2812FX_setPixelColor_2(i, (color >> 1) & 0x7F7F7F7F);
             
         } else { // new fade-to-color algorithm
-            int w1 = (color >> 24) & 0xff;
-            int r1 = (color >> 16) & 0xff;
-            int g1 = (color >>  8) & 0xff;
-            int b1 =  color        & 0xff;
-
+        */
+            int w1 = (color >> 24) & 0xFF;
+            int r1 = (color >> 16) & 0xFF;
+            int g1 = (color >>  8) & 0xFF;
+            int b1 =  color        & 0xFF;
+        
             // calculate the color differences between the current and target colors
             int wdelta = w2 - w1;
             int rdelta = r2 - r1;
             int gdelta = g2 - g1;
             int bdelta = b2 - b1;
-
+        
             // if the current and target colors are almost the same, jump right to the target
             // color, otherwise calculate an intermediate color. (fixes rounding issues)
-            wdelta = abs(wdelta) < 3 ? wdelta : (wdelta >> rateH) + (wdelta >> rateL);
-            rdelta = abs(rdelta) < 3 ? rdelta : (rdelta >> rateH) + (rdelta >> rateL);
-            gdelta = abs(gdelta) < 3 ? gdelta : (gdelta >> rateH) + (gdelta >> rateL);
-            bdelta = abs(bdelta) < 3 ? bdelta : (bdelta >> rateH) + (bdelta >> rateL);
+            wdelta = private_abs(wdelta) < 3 ? wdelta : (wdelta >> rateH) + (wdelta >> rateL);
+            rdelta = private_abs(rdelta) < 3 ? rdelta : (rdelta >> rateH) + (rdelta >> rateL);
+            gdelta = private_abs(gdelta) < 3 ? gdelta : (gdelta >> rateH) + (gdelta >> rateL);
+            bdelta = private_abs(bdelta) < 3 ? bdelta : (bdelta >> rateH) + (bdelta >> rateL);
 
             WS2812FX_setPixelColor_5(i, r1 + rdelta, g1 + gdelta, b1 + bdelta, w1 + wdelta);
-        }
+        //}
     }
 }
 
-
 static void WS2812FX_fade_out() {
     WS2812FX_fade_out_color(current_lightbulb_fx_data->colors[1]);
+}
+
+static void WS2812FX_scan(uint32_t color1, uint32_t color2, bool dual, bool with_fade) {
+    int8_t dir = current_lightbulb_fx_data->aux_param ? -1 : 1;
+    uint8_t size = 1 << SIZE_OPTION;
+    
+    if (size >= current_lightbulb_fx_data->leds_array_size) {
+        return;
+    }
+    
+    if (with_fade) {
+        WS2812FX_fade_out();
+    } else {
+        WS2812FX_fill(color2, 0, current_lightbulb_fx_data->leds_array_size);
+    }
+
+    for (unsigned int i = 0; i < size; i++) {
+        if (IS_REVERSE || dual) {
+            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - current_lightbulb_fx_data->counter_mode_step - i, color1);
+        }
+        
+        if (!IS_REVERSE || dual) {
+            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->counter_mode_step + i, color1);
+        }
+    }
+
+    current_lightbulb_fx_data->counter_mode_step += dir;
+    
+    if (current_lightbulb_fx_data->counter_mode_step == 0) {
+        current_lightbulb_fx_data->aux_param = 0;
+    }
+    
+    if (current_lightbulb_fx_data->counter_mode_step >= (uint16_t)(current_lightbulb_fx_data->leds_array_size - size)) {
+        current_lightbulb_fx_data->aux_param = 1;
+    }
+
+    set_next_time(current_lightbulb_fx_data->speed / (current_lightbulb_fx_data->leds_array_size * 2));
+}
+
+static void WS2812FX_tricolor_chase(uint32_t color1, uint32_t color2, uint32_t color3) {
+    uint8_t sizeCnt = 1 << SIZE_OPTION;
+    uint8_t sizeCnt2 = sizeCnt + sizeCnt;
+    uint8_t sizeCnt3 = sizeCnt2 + sizeCnt;
+    unsigned int index = current_lightbulb_fx_data->counter_mode_step % sizeCnt3;
+    
+    for (unsigned int i = 0; i < current_lightbulb_fx_data->leds_array_size; i++, index++) {
+        index = index % sizeCnt3;
+
+        uint32_t color = color3;
+        if (index < sizeCnt) {
+            color = color1;
+        } else if (index < sizeCnt2) {
+            color = color2;
+        }
+
+        if (IS_REVERSE) {
+            WS2812FX_setPixelColor_2(i, color);
+        } else {
+            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - i, color);
+        }
+    }
+    
+    current_lightbulb_fx_data->counter_mode_step++;
+
+    set_next_time(current_lightbulb_fx_data->speed / 16);
+}
+
+// https://github.com/adafruit/Adafruit_NeoPixel/blob/master/Adafruit_NeoPixel.h#L302
+static uint8_t WS2812FX_ada_sine8(const uint8_t x) {
+    const uint8_t _NeoPixelSineTable[256] = {
+        128, 131, 134, 137, 140, 143, 146, 149, 152, 155, 158, 162, 165, 167, 170,
+        173, 176, 179, 182, 185, 188, 190, 193, 196, 198, 201, 203, 206, 208, 211,
+        213, 215, 218, 220, 222, 224, 226, 228, 230, 232, 234, 235, 237, 238, 240,
+        241, 243, 244, 245, 246, 248, 249, 250, 250, 251, 252, 253, 253, 254, 254,
+        254, 255, 255, 255, 255, 255, 255, 255, 254, 254, 254, 253, 253, 252, 251,
+        250, 250, 249, 248, 246, 245, 244, 243, 241, 240, 238, 237, 235, 234, 232,
+        230, 228, 226, 224, 222, 220, 218, 215, 213, 211, 208, 206, 203, 201, 198,
+        196, 193, 190, 188, 185, 182, 179, 176, 173, 170, 167, 165, 162, 158, 155,
+        152, 149, 146, 143, 140, 137, 134, 131, 128, 124, 121, 118, 115, 112, 109,
+        106, 103, 100, 97,  93,  90,  88,  85,  82,  79,  76,  73,  70,  67,  65,
+        62,  59,  57,  54,  52,  49,  47,  44,  42,  40,  37,  35,  33,  31,  29,
+        27,  25,  23,  21,  20,  18,  17,  15,  14,  12,  11,  10,  9,   7,   6,
+        5,   5,   4,   3,   2,   2,   1,   1,   1,   0,   0,   0,   0,   0,   0,
+        0,   1,   1,   1,   2,   2,   3,   4,   5,   5,   6,   7,   9,   10,  11,
+        12,  14,  15,  17,  18,  20,  21,  23,  25,  27,  29,  31,  33,  35,  37,
+        40,  42,  44,  47,  49,  52,  54,  57,  59,  62,  65,  67,  70,  73,  76,
+        79,  82,  85,  88,  90,  93,  97,  100, 103, 106, 109, 112, 115, 118, 121,
+        124
+    };
+    
+    return _NeoPixelSineTable[x];
+}
+
+static void WS2812FX_twinkle(uint32_t color1, uint32_t color2) {
+    if (current_lightbulb_fx_data->counter_mode_step == 0) {
+        WS2812FX_fill(color2, 0, current_lightbulb_fx_data->leds_array_size);
+        uint16_t min_leds = (current_lightbulb_fx_data->leds_array_size / 4) + 1; // make sure, at least one LED is on
+        current_lightbulb_fx_data->counter_mode_step = WS2812FX_random(min_leds, min_leds * 2);
+    }
+    
+    WS2812FX_setPixelColor_2(WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size - 1), color1);
+    
+    current_lightbulb_fx_data->counter_mode_step--;
+    
+    set_next_time(current_lightbulb_fx_data->speed / current_lightbulb_fx_data->leds_array_size);
 }
 
 static void WS2812FX_twinkle_fade(uint32_t color) {
@@ -528,7 +520,6 @@ static void WS2812FX_twinkle_fade(uint32_t color) {
         uint8_t size = 1 << SIZE_OPTION;
         uint16_t index = WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size - size);
         WS2812FX_fill(color, index, size);
-        SET_CYCLE;
     }
     
     set_next_time(current_lightbulb_fx_data->speed / 16);
@@ -540,12 +531,11 @@ static void WS2812FX_sparkle(uint32_t color1, uint32_t color2) {
     }
 
     uint8_t size = 1 << SIZE_OPTION;
+    
     WS2812FX_fill(color1, current_lightbulb_fx_data->aux_param3, size);
 
     current_lightbulb_fx_data->aux_param3 = WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size - size); // aux_param3 stores the random led index
     WS2812FX_fill(color2, current_lightbulb_fx_data->aux_param3, size);
-
-    SET_CYCLE;
     
     set_next_time(current_lightbulb_fx_data->speed / 32);
 }
@@ -570,10 +560,6 @@ static void WS2812FX_chase(uint32_t color1, uint32_t color2, uint32_t color3) {
         }
     }
 
-    if (current_lightbulb_fx_data->counter_mode_step + (size * 3) == current_lightbulb_fx_data->leds_array_size) {
-        SET_CYCLE;
-    }
-
     current_lightbulb_fx_data->counter_mode_step = (current_lightbulb_fx_data->counter_mode_step + 1) % current_lightbulb_fx_data->leds_array_size;
     
     set_next_time(current_lightbulb_fx_data->speed / current_lightbulb_fx_data->leds_array_size);
@@ -589,8 +575,8 @@ static void WS2812FX_chase_flash(uint32_t color1, uint32_t color2) {
         uint16_t m = (current_lightbulb_fx_data->counter_mode_step + 1) % current_lightbulb_fx_data->leds_array_size;
         
         if (IS_REVERSE) {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - n - 1, color);
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - m - 1, color);
+            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - n, color);
+            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - m, color);
             
         } else {
             WS2812FX_setPixelColor_2(n, color);
@@ -604,8 +590,6 @@ static void WS2812FX_chase_flash(uint32_t color1, uint32_t color2) {
         if (current_lightbulb_fx_data->counter_mode_step == 0) {
             // update aux_param so mode_chase_flash_random() will select the next color
             current_lightbulb_fx_data->aux_param = WS2812FX_get_random_wheel_index(current_lightbulb_fx_data->aux_param);
-            
-            SET_CYCLE;
         }
         
         set_next_time(current_lightbulb_fx_data->speed / current_lightbulb_fx_data->leds_array_size);
@@ -614,6 +598,7 @@ static void WS2812FX_chase_flash(uint32_t color1, uint32_t color2) {
 
 static void WS2812FX_running(uint32_t color1, uint32_t color2) {
     uint8_t size = 2 << SIZE_OPTION;
+    
     uint32_t color = (current_lightbulb_fx_data->counter_mode_step & size) ? color1 : color2;
 
     if (IS_REVERSE) {
@@ -625,52 +610,34 @@ static void WS2812FX_running(uint32_t color1, uint32_t color2) {
     }
 
     current_lightbulb_fx_data->counter_mode_step++;
-    if ((current_lightbulb_fx_data->counter_mode_step % current_lightbulb_fx_data->leds_array_size) == 0) {
-        SET_CYCLE;
-    }
     
     set_next_time(current_lightbulb_fx_data->speed / 16);
 }
 
 static void WS2812FX_fireworks(uint32_t color) {
     WS2812FX_fade_out();
-
+    
     // for better performance, manipulate the Adafruit_NeoPixels pixels[] array directly
     uint8_t *pixels = current_lightbulb_fx_data->leds_array;
     uint8_t bytesPerPixel = current_lightbulb_fx_data->channels;
     uint16_t stopPixel = (current_lightbulb_fx_data->leds_array_size - 1) * bytesPerPixel;
     
-    for (uint16_t i = bytesPerPixel; i < stopPixel; i++) {
-        uint16_t tmpPixel = (pixels[i - bytesPerPixel] >> 2) + pixels[i] + (pixels[i + bytesPerPixel] >> 2);
-        
-        pixels[i] = tmpPixel > 255 ? 255 : tmpPixel;
+    if (current_lightbulb_fx_data->leds_array_size >= 3) {
+        for (unsigned int i = bytesPerPixel; i < stopPixel; i++) {
+            uint16_t tmpPixel = (pixels[i - bytesPerPixel] >> 2) + pixels[i] + (pixels[i + bytesPerPixel] >> 2);
+            
+            pixels[i] = tmpPixel > 255 ? 255 : tmpPixel;
+        }
     }
     
     uint8_t size = 2 << SIZE_OPTION;
     
-    /*
-    if (!_triggered) {
-        uint16_t numBursts = current_lightbulb_fx_data->leds_array_size / 20 > 1 ? current_lightbulb_fx_data->leds_array_size / 20 : 1;
-        for (uint16_t i = 0; i < numBursts; i++) {
-            if (WS2812FX_random8_lim(10) == 0) {
-                uint16_t index = WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size - size + 1);
-                WS2812FX_fill(color, index, size);
-                
-                SET_CYCLE;
-            }
-        }
-        
-    } else {
-     */
-        uint16_t numBursts = current_lightbulb_fx_data->leds_array_size / 10 > 1 ? current_lightbulb_fx_data->leds_array_size / 10 : 1;
-        for (uint16_t i = 0; i < numBursts; i++) {
-            uint16_t index = WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size - size + 1);
-            WS2812FX_fill(color, index, size);
-            
-            SET_CYCLE;
-        }
-    //}
-
+    uint16_t numBursts = current_lightbulb_fx_data->leds_array_size / 10 > 1 ? current_lightbulb_fx_data->leds_array_size / 10 : 1;
+    for (unsigned int i = 0; i < numBursts; i++) {
+        uint16_t index = WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size - size + 1);
+        WS2812FX_fill(color, index, size);
+    }
+    
     set_next_time(current_lightbulb_fx_data->speed / 16);
 }
 
@@ -687,7 +654,7 @@ static void WS2812FX_fire_flicker(int rev_intensity) {
     
     uint8_t lum = maxLum / rev_intensity;
     
-    for (uint16_t i = 0; i < current_lightbulb_fx_data->leds_array_size; i++) {
+    for (unsigned int i = 0; i < current_lightbulb_fx_data->leds_array_size; i++) {
         uint8_t flicker = WS2812FX_random8_lim(lum);
         uint8_t r2 = (r - flicker) > 0 ? (r - flicker) : 0;
         uint8_t g2 = (g - flicker) > 0 ? (g - flicker) : 0;
@@ -695,8 +662,6 @@ static void WS2812FX_fire_flicker(int rev_intensity) {
         uint8_t w2 = (w - flicker) > 0 ? (w - flicker) : 0;
         WS2812FX_setPixelColor_5(i, r2, g2, b2, w2);
     }
-    
-    SET_CYCLE;
     
     set_next_time(current_lightbulb_fx_data->speed / current_lightbulb_fx_data->leds_array_size);
 }
@@ -787,8 +752,6 @@ static void WS2812FX_mode_random_color() {
     uint32_t color = WS2812FX_color_wheel(current_lightbulb_fx_data->aux_param);
     WS2812FX_fill(color, 0, current_lightbulb_fx_data->leds_array_size);
     
-    SET_CYCLE;
-    
     set_next_time(current_lightbulb_fx_data->speed);
 }
 
@@ -807,8 +770,6 @@ static void WS2812FX_mode_single_dynamic() {
     
     uint16_t first = (WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size / size) * size);
     WS2812FX_fill(WS2812FX_color_wheel(WS2812FX_random8()), first, size);
-    
-    SET_CYCLE;
     
     set_next_time(current_lightbulb_fx_data->speed / 16);
 }
@@ -830,8 +791,6 @@ static void WS2812FX_mode_multi_dynamic() {
             WS2812FX_setPixelColor_2(i, WS2812FX_color_wheel(WS2812FX_random8()));
         }
     }
-    
-    SET_CYCLE;
     
     set_next_time(current_lightbulb_fx_data->speed / 4);
 }
@@ -862,7 +821,6 @@ static void WS2812FX_mode_breath() {
     current_lightbulb_fx_data->counter_mode_step += 2;
     if (current_lightbulb_fx_data->counter_mode_step > (512 - 15)) {
         current_lightbulb_fx_data->counter_mode_step = 15;
-        SET_CYCLE;
     }
     
     set_next_time(delay);
@@ -883,7 +841,6 @@ static void WS2812FX_mode_fade() {
     current_lightbulb_fx_data->counter_mode_step += 4;
     if (current_lightbulb_fx_data->counter_mode_step > 511) {
         current_lightbulb_fx_data->counter_mode_step = 0;
-        SET_CYCLE;
     }
     
     set_next_time(current_lightbulb_fx_data->speed / 128);
@@ -893,14 +850,14 @@ static void WS2812FX_mode_fade() {
  * Runs a block of pixels back and forth.
  */
 static void WS2812FX_mode_scan() {
-    WS2812FX_scan(current_lightbulb_fx_data->colors[0], current_lightbulb_fx_data->colors[1], false);
+    WS2812FX_scan(current_lightbulb_fx_data->colors[0], current_lightbulb_fx_data->colors[1], false, false);
 }
 
 /*
  * Runs two blocks of pixels back and forth in opposite directions.
  */
 static void WS2812FX_mode_dual_scan() {
-    WS2812FX_scan(current_lightbulb_fx_data->colors[0], current_lightbulb_fx_data->colors[1], true);
+    WS2812FX_scan(current_lightbulb_fx_data->colors[0], current_lightbulb_fx_data->colors[1], true, false);
 }
     
 /*
@@ -911,10 +868,6 @@ static void WS2812FX_mode_rainbow() {
     WS2812FX_fill(color, 0, current_lightbulb_fx_data->leds_array_size);
 
     current_lightbulb_fx_data->counter_mode_step = (current_lightbulb_fx_data->counter_mode_step + 1) & 0xFF;
-
-    if (current_lightbulb_fx_data->counter_mode_step == 0) {
-        SET_CYCLE;
-    }
 
     set_next_time(current_lightbulb_fx_data->speed / 256);
 }
@@ -941,8 +894,7 @@ static void WS2812FX_mode_rainbow_cycle() {
     current_lightbulb_fx_data->counter_mode_step += colorIndexIncr;
     
     if (current_lightbulb_fx_data->counter_mode_step > 255) {
-        current_lightbulb_fx_data->counter_mode_step &= 0xff;
-        SET_CYCLE;
+        current_lightbulb_fx_data->counter_mode_step &= 0xFF;
     }
 
     set_next_time(current_lightbulb_fx_data->speed / 64);
@@ -989,20 +941,17 @@ static void WS2812FX_mode_running_lights() {
     sineIncr = sineIncr > 1 ? sineIncr : 1;
     
     for (unsigned int i = 0; i < current_lightbulb_fx_data->leds_array_size; i++) {
-        const uint8_t lum = WS2812FX_fast_sine8(((i + current_lightbulb_fx_data->counter_mode_step) * sineIncr));
+        const uint8_t lum = WS2812FX_ada_sine8(((i + current_lightbulb_fx_data->counter_mode_step) * sineIncr));
         uint32_t color = WS2812FX_color_blend(current_lightbulb_fx_data->colors[0], current_lightbulb_fx_data->colors[1], lum);
         
         if (IS_REVERSE) {
             WS2812FX_setPixelColor_2(i, color);
         } else {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - i - 1,  color);
+            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - i,  color);
         }
     }
     
     current_lightbulb_fx_data->counter_mode_step = (current_lightbulb_fx_data->counter_mode_step + 1) % 256;
-    if (current_lightbulb_fx_data->counter_mode_step == 0) {
-        SET_CYCLE;
-    }
     
     set_next_time(current_lightbulb_fx_data->speed / current_lightbulb_fx_data->leds_array_size);
 }
@@ -1064,8 +1013,6 @@ static void WS2812FX_mode_hyper_sparkle() {
     for (unsigned int i = 0; i < 8; i++) {
         WS2812FX_fill(WHITE, WS2812FX_random16_lim(current_lightbulb_fx_data->leds_array_size - size), size);
     }
-
-    SET_CYCLE;
     
     set_next_time(current_lightbulb_fx_data->speed / 32);
 }
@@ -1088,9 +1035,6 @@ static void WS2812FX_mode_multi_strobe() {
     }
 
     current_lightbulb_fx_data->counter_mode_step = (current_lightbulb_fx_data->counter_mode_step + 1) % (count + 1);
-    if (current_lightbulb_fx_data->counter_mode_step == 0) {
-        SET_CYCLE;
-    }
     
     set_next_time(delay);
 }
@@ -1229,31 +1173,7 @@ static void WS2812FX_mode_running_random() {
  * K.I.T.T.
  */
 static void WS2812FX_mode_larson_scanner() {
-    WS2812FX_fade_out();
-
-    if (current_lightbulb_fx_data->counter_mode_step < current_lightbulb_fx_data->leds_array_size) {
-        if (IS_REVERSE) {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - current_lightbulb_fx_data->counter_mode_step, current_lightbulb_fx_data->colors[0]);
-        } else {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->counter_mode_step, current_lightbulb_fx_data->colors[0]);
-        }
-    } else {
-        uint16_t index = (current_lightbulb_fx_data->leds_array_size * 2) - current_lightbulb_fx_data->counter_mode_step - 2;
-        if (IS_REVERSE) {
-            WS2812FX_setPixelColor_2(current_lightbulb_fx_data->leds_array_size - 1 - index, current_lightbulb_fx_data->colors[0]);
-        } else {
-            WS2812FX_setPixelColor_2(index, current_lightbulb_fx_data->colors[0]);
-        }
-    }
-
-    current_lightbulb_fx_data->counter_mode_step++;
-    if (current_lightbulb_fx_data->counter_mode_step >= (uint16_t)((current_lightbulb_fx_data->leds_array_size * 2) - 2)) {
-        current_lightbulb_fx_data->counter_mode_step = 0;
-        
-        SET_CYCLE;
-    }
-
-    set_next_time(current_lightbulb_fx_data->speed / (current_lightbulb_fx_data->leds_array_size * 2));
+    WS2812FX_scan(current_lightbulb_fx_data->colors[0], current_lightbulb_fx_data->colors[1], false, true);
 }
 
 /*
@@ -1269,10 +1189,6 @@ static void WS2812FX_mode_comet() {
     }
 
     current_lightbulb_fx_data->counter_mode_step = (current_lightbulb_fx_data->counter_mode_step + 1) % current_lightbulb_fx_data->leds_array_size;
-    
-    if (current_lightbulb_fx_data->counter_mode_step == 0) {
-        SET_CYCLE;
-    }
 
     set_next_time(current_lightbulb_fx_data->speed / current_lightbulb_fx_data->leds_array_size);
 }
@@ -1284,7 +1200,7 @@ static void WS2812FX_mode_fireworks() {
     uint32_t color = BLACK;
     
     do {    // randomly choose a non-BLACK color from the colors array
-        color = current_lightbulb_fx_data->colors[WS2812FX_random8(MAX_NUM_COLORS)];
+        color = current_lightbulb_fx_data->colors[WS2812FX_random8_lim(2)];
     } while (color == BLACK);
     
     WS2812FX_fireworks(color);
@@ -1323,51 +1239,51 @@ static void WS2812FX_mode_fire_flicker_intense() {
 static void WS2812FX_mode_twinkleFOX() {
     uint8_t size = 1 << SIZE_OPTION;
     uint16_t mySeed = 0;    // reset the random number generator seed
-
+    
     // Get the segment's colors array values
     uint32_t color0 = current_lightbulb_fx_data->colors[0];
     uint32_t color1 = current_lightbulb_fx_data->colors[1];
     uint32_t color2 = current_lightbulb_fx_data->colors[2];
     uint32_t blendedColor;
-
-    for (uint16_t i = 0; i <= current_lightbulb_fx_data->leds_array_size - 1; i += size) {
+    
+    for (unsigned int i = 0; i < current_lightbulb_fx_data->leds_array_size; i += size) {
         // Use Mark Kriegsman's clever idea of using pseudo-random numbers to determine
         // each LED's initial and increment blend values
         mySeed = (mySeed * 2053) + 13849;   // a random, but deterministic, number
-        uint16_t initValue = (mySeed + (mySeed >> 8)) & 0xff;   // the LED's initial blend index (0-255)
+        uint16_t initValue = (mySeed + (mySeed >> 8)) & 0xFF;   // the LED's initial blend index (0-255)
         mySeed = (mySeed * 2053) + 13849;   // another random, but deterministic, number
         uint16_t incrValue = (((mySeed + (mySeed >> 8)) & 0x07) + 1) * 2;   // blend index increment (2,4,6,8,10,12,14,16)
-
+        
         // We're going to use a sine function to blend colors, instead of Mark's triangle
         // function, simply because a sine lookup table is already built into the
         // Adafruit_NeoPixel lib. Yes, I'm lazy.
         // Use the counter_mode_call var as a clock "tick" counter and calc the blend index
-        uint8_t blendIndex = (initValue + (current_lightbulb_fx_data->counter_mode_call * incrValue)) & 0xff;   // 0-255
+        uint8_t blendIndex = (initValue + (current_lightbulb_fx_data->counter_mode_call * incrValue)) & 0xFF;   // 0-255
         // Index into the built-in Adafruit_NeoPixel sine table to lookup the blend amount
-        uint8_t blendAmt = WS2812FX_fast_sine8(blendIndex); // 0-255
-
+        uint8_t blendAmt = WS2812FX_ada_sine8(blendIndex); // 0-255
+        
         // If colors[0] is BLACK, blend random colors
         if (color0 == BLACK) {
             blendedColor = WS2812FX_color_blend(WS2812FX_color_wheel(initValue), color1, blendAmt);
             // If colors[2] isn't BLACK, choose to blend colors[0]/colors[1] or colors[1]/colors[2]
             // (which color pair to blend is picked randomly)
+            
         } else if ((color2 != BLACK) && (initValue < 128) == 0) {
             blendedColor = WS2812FX_color_blend(color2, color1, blendAmt);
             // Otherwise always blend colors[0]/colors[1]
+            
         } else {
             blendedColor = WS2812FX_color_blend(color0, color1, blendAmt);
         }
-
+        
         // Assign the new color to the number of LEDs specified by the SIZE option
-        for (uint8_t j = 0; j < size; j++) {
+        for (unsigned int j = 0; j < size; j++) {
             const uint16_t address = i + j;
             if (address < current_lightbulb_fx_data->leds_array_size) {
                 WS2812FX_setPixelColor_2(address, blendedColor);
             }
         }
     }
-    
-    SET_CYCLE;
     
     set_next_time(current_lightbulb_fx_data->speed / 32);
 }
@@ -1387,16 +1303,21 @@ static void WS2812FX_mode_rain() {
     
     // shift everything two pixels
     if (IS_REVERSE) {
-        WS2812FX_copyPixels(0, 2, current_lightbulb_fx_data->leds_array_size - 3);
+        WS2812FX_copyPixels(0, 2, current_lightbulb_fx_data->leds_array_size - 2);
     } else {
-        WS2812FX_copyPixels(2, 0, current_lightbulb_fx_data->leds_array_size - 3);
+        WS2812FX_copyPixels(2, 0, current_lightbulb_fx_data->leds_array_size - 2);
     }
 }
 
+static void WS2812FX_mode_pause() {
+    set_next_time(current_lightbulb_fx_data->speed);
+}
+
 // -------------
-    
+
 void set_fx_speed(lightbulb_fx_data_t* lightbulb_fx_data, const uint8_t new_speed) {
-    unsigned int new_fx_speed = ((100 - new_speed) * 30) + 10;
+    const unsigned int new_speed_inv = 100 - new_speed;
+    const unsigned int new_fx_speed = ((new_speed_inv * 16) * (new_speed_inv / 10)) + 20;
     
     lightbulb_fx_data->speed = new_fx_speed;
     lightbulb_fx_data->next_time = get_lightbulb_fx_effect_now_ms() + 100;
@@ -1409,12 +1330,10 @@ bool set_lightbulb_fx_effect(lightbulb_fx_data_t* lightbulb_fx_data) {
     
     current_lightbulb_fx_data = lightbulb_fx_data;
     
-    CLR_FRAME_CYCLE;
+    unsigned int is_frame = false;
     
     uint32_t now = get_lightbulb_fx_effect_now_ms();
     if (now >= current_lightbulb_fx_data->next_time || current_lightbulb_fx_data->next_time - now > 10000000 ) {
-        SET_FRAME;
-        
         switch (current_lightbulb_fx_data->effect) {
             case 1:
                 WS2812FX_mode_blink();
@@ -1640,15 +1559,20 @@ bool set_lightbulb_fx_effect(lightbulb_fx_data_t* lightbulb_fx_data) {
                 WS2812FX_mode_rain();
                 break;
                 
+            case 100:
+                WS2812FX_mode_pause();
+                current_lightbulb_fx_data->counter_mode_call--;
+                break;
+                
             default:
                 current_lightbulb_fx_data->effect = 0;
                 break;
         }
         
         current_lightbulb_fx_data->counter_mode_call++;
+        
+        is_frame = true;
     }
-    
-    const unsigned int is_frame = WS2812FX_isFrame();
     
     current_lightbulb_fx_data = NULL;
     

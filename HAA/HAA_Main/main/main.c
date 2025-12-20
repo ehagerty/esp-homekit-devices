@@ -3815,10 +3815,33 @@ void rgbw_set_timer_worker() {
         if (LIGHTBULB_TYPE != LIGHTBULB_TYPE_VIRTUAL) {
             lightbulb_group->has_changed = false;
             
+            ch_group_t* ch_group = ch_group_find(lightbulb_group->ch0);
+            const unsigned int lightbulb_fx_must_run = lightbulb_group->lightbulb_fx_data && lightbulb_group->lightbulb_fx_data->effect != 0 && ch_group->ch[0]->value.bool_value;
+            
+            if (lightbulb_fx_must_run) {
+                set_fx_color0(lightbulb_group);
+                
+                lightbulb_group->has_changed = set_lightbulb_fx_effect(lightbulb_group->lightbulb_fx_data);
+                
+                all_channels_ready = false;
+                
+            } else if (lightbulb_group->lightbulb_fx_data && lightbulb_group->lightbulb_fx_data->effect != 0) {
+                lightbulb_group->current[0] = 1;
+            }
+            
             for (unsigned int i = 0; i < LIGHTBULB_CHANNELS; i++) {
                 unsigned int pwm_needs_update = false;
                 
-                if (private_abs(lightbulb_group->target[i] - lightbulb_group->current[i]) > private_abs(LIGHTBULB_STEP_VALUE[i])) {
+                if (lightbulb_fx_must_run) {
+                    if (lightbulb_group->has_changed) {
+                        const float color_full_brightness = lightbulb_group->lightbulb_fx_data->leds_array[i];
+                        const float color_dim_brightness = color_full_brightness * ch_group->ch[1]->value.int_value / 100;
+                        const unsigned int color = HAA_MIN(LIGHTBULB_MAX_POWER * color_dim_brightness, color_full_brightness);
+                        
+                        lightbulb_group->current[i] = color << 8;
+                    }
+                    
+                } else if (private_abs(lightbulb_group->target[i] - lightbulb_group->current[i]) > private_abs(LIGHTBULB_STEP_VALUE[i])) {
                     all_channels_ready = false;
                     lightbulb_group->current[i] += LIGHTBULB_STEP_VALUE[i];
                     lightbulb_group->has_changed = true;
@@ -3830,7 +3853,8 @@ void rgbw_set_timer_worker() {
                     pwm_needs_update = true;
                 }
                 
-                if (pwm_needs_update && LIGHTBULB_TYPE <= LIGHTBULB_TYPE_PWM_CWWW) {
+                if (((lightbulb_fx_must_run && lightbulb_group->has_changed) || pwm_needs_update) &&
+                    LIGHTBULB_TYPE <= LIGHTBULB_TYPE_PWM_CWWW) {
                     haa_pwm_set_duty(lightbulb_group->gpio[i], lightbulb_group->current[i]);
                 }
             }
@@ -3856,17 +3880,9 @@ void rgbw_set_timer_worker() {
             lightbulb_group = main_config.lightbulb_groups;
             while (lightbulb_group) {
                 if (LIGHTBULB_TYPE == LIGHTBULB_TYPE_NRZ && lightbulb_group->gpio[0] == addressled->gpio) {
-                    ch_group_t* ch_group = ch_group_find(lightbulb_group->ch0);
-                    
-                    if (lightbulb_group->lightbulb_fx_data && lightbulb_group->lightbulb_fx_data->effect != 0 && ch_group->ch[0]->value.bool_value) {
-                        set_fx_color0(lightbulb_group);
-                        
-                        has_changed = set_lightbulb_fx_effect(lightbulb_group->lightbulb_fx_data);
-                        
-                        all_channels_ready = false;
-                        
-                    } else if (lightbulb_group->has_changed) {
+                    if (lightbulb_group->has_changed) {
                         has_changed = true;
+                        break;
                     }
                 }
                 
@@ -4103,15 +4119,29 @@ void hkc_fx_setter(homekit_characteristic_t* ch, const homekit_value_t value) {
         // Effect
         if (ch == ch_group->ch[4]) {
             if (lightbulb_group->lightbulb_fx_data->effect != value.int_value) {
-                
                 lightbulb_group->lightbulb_fx_data->effect = value.int_value;
-                lightbulb_group->lightbulb_fx_data->counter_mode_step = 0;
-                lightbulb_group->lightbulb_fx_data->counter_mode_call = 0;
-                lightbulb_group->lightbulb_fx_data->aux_param = 0;
-                lightbulb_group->lightbulb_fx_data->aux_param2 = 0;
-                lightbulb_group->lightbulb_fx_data->aux_param3 = 0;
+                
+                if (lightbulb_group->lightbulb_fx_data->effect != lightbulb_group->lightbulb_fx_data->last_effect &&
+                    lightbulb_group->lightbulb_fx_data->effect != LIGHTBULB_FX_EFFECT_PAUSE) {
+                    lightbulb_group->lightbulb_fx_data->last_effect = value.int_value;
+                    
+                    lightbulb_group->lightbulb_fx_data->counter_mode_step = 0;
+                    lightbulb_group->lightbulb_fx_data->counter_mode_call = 0;
+                    lightbulb_group->lightbulb_fx_data->aux_param = 0;
+                    lightbulb_group->lightbulb_fx_data->aux_param3 = 0;
+                    
+                    //memset(lightbulb_group->lightbulb_fx_data->leds_array, 0, lightbulb_group->lightbulb_fx_data->leds_array_size);
+                }
                 
                 if (ch_group->ch[0]->value.bool_value) {
+                    if (value.int_value == 0) {
+                        if (lightbulb_group->current[0] == 0) {
+                            lightbulb_group->current[0]++;
+                        } else {
+                            lightbulb_group->current[0]--;
+                        }
+                    }
+                    
                     rs_esp_timer_start(LIGHTBULB_SET_DELAY_TIMER);
                 }
             }
@@ -11750,6 +11780,8 @@ void normal_mode_init() {
             }
         }
         
+        unsigned int lightbulb_fx_range_size = 1;
+        
         if (LIGHTBULB_TYPE == LIGHTBULB_TYPE_PWM || LIGHTBULB_TYPE == LIGHTBULB_TYPE_PWM_CWWW) {
             LIGHTBULB_CHANNELS = cJSON_rsf_GetArraySize(gpio_array);
             for (unsigned int i = 0; i < LIGHTBULB_CHANNELS; i++) {
@@ -11775,7 +11807,8 @@ void normal_mode_init() {
             LIGHTBULB_RANGE_START = cJSON_rsf_GetArrayItem(gpio_array, 1)->valuefloat;
             LIGHTBULB_RANGE_START -= 1;
             LIGHTBULB_RANGE_END = cJSON_rsf_GetArrayItem(gpio_array, 2)->valuefloat;
-            const unsigned int lightbulb_range_size = LIGHTBULB_RANGE_END - LIGHTBULB_RANGE_START;
+            
+            lightbulb_fx_range_size = LIGHTBULB_RANGE_END - LIGHTBULB_RANGE_START;
             
             LIGHTBULB_RANGE_START = LIGHTBULB_RANGE_START * LIGHTBULB_CHANNELS;
             LIGHTBULB_RANGE_END = LIGHTBULB_RANGE_END * LIGHTBULB_CHANNELS;
@@ -11798,16 +11831,6 @@ void normal_mode_init() {
                 }
             }
             
-            if (cJSON_rsf_GetObjectItemCaseSensitive(json_context, LIGHTBULB_FX_SET) != NULL) {
-                lightbulb_group->lightbulb_fx_data = new_lightbulb_fx_data(lightbulb_range_size, LIGHTBULB_CHANNELS);
-                
-                ch_group->ch[4] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_EFFECT, 0, .setter_ex=hkc_fx_setter);
-                ch_group->ch[5] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_SPEED, 70, .setter_ex=hkc_fx_setter);
-                ch_group->ch[6] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_REVERSE, 0, .setter_ex=hkc_fx_setter);
-                ch_group->ch[7] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_SIZE, 0, .setter_ex=hkc_fx_setter);
-                ch_group->ch[8] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_COLOR2, 0, .setter_ex=hkc_fx_setter);
-                ch_group->ch[9] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_COLOR3, 0, .setter_ex=hkc_fx_setter);
-            }
 #endif  // no CONFIG_IDF_TARGET_ESP32C2
             
         }
@@ -11931,12 +11954,34 @@ void normal_mode_init() {
             // Channels 3+
             calloc_count += 2;
             
-            if (ch_group->ch[4]) {  // With FX
-                calloc_count += 6;
-            }
-            
             ch_group->ch[2] = NEW_HOMEKIT_CHARACTERISTIC(HUE, 0, .setter_ex=hkc_rgbw_setter);
             ch_group->ch[3] = NEW_HOMEKIT_CHARACTERISTIC(SATURATION, 0, .setter_ex=hkc_rgbw_setter);
+            
+            if (cJSON_rsf_GetObjectItemCaseSensitive(json_context, LIGHTBULB_FX_SET) != NULL) {
+                lightbulb_group->lightbulb_fx_data = new_lightbulb_fx_data(lightbulb_fx_range_size, LIGHTBULB_CHANNELS);
+                
+                calloc_count += 6;
+                
+                ch_group->ch[4] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_EFFECT,    0, .setter_ex=hkc_fx_setter);
+                ch_group->ch[5] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_SPEED,    70, .setter_ex=hkc_fx_setter);
+                ch_group->ch[6] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_REVERSE,   0, .setter_ex=hkc_fx_setter);
+                ch_group->ch[7] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_SIZE,      0, .setter_ex=hkc_fx_setter);
+                ch_group->ch[8] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_COLOR2,    0, .setter_ex=hkc_fx_setter);
+                ch_group->ch[9] = NEW_HOMEKIT_CHARACTERISTIC(CUSTOM_LIGHTBULB_FX_COLOR3,    0, .setter_ex=hkc_fx_setter);
+                
+                for (unsigned int s = 4; s <= 9; s++) {
+                    ch_group->ch[s]->value.int_value = set_initial_state(ch_group, s, NULL, 5, CH_TYPE_INT);
+                }
+                
+                lightbulb_group->lightbulb_fx_data->effect = ch_group->ch[4]->value.int_value;
+                lightbulb_group->lightbulb_fx_data->last_effect = ch_group->ch[4]->value.int_value;
+                set_fx_speed(lightbulb_group->lightbulb_fx_data, ch_group->ch[5]->value.int_value);
+                set_fx_reverse(lightbulb_group->lightbulb_fx_data, ch_group->ch[6]->value.int_value);
+                set_fx_size(lightbulb_group->lightbulb_fx_data, ch_group->ch[7]->value.int_value);
+                set_fx_color0(lightbulb_group);
+                lightbulb_group->lightbulb_fx_data->colors[1]= ch_group->ch[8]->value.int_value;
+                lightbulb_group->lightbulb_fx_data->colors[2]= ch_group->ch[9]->value.int_value;
+            }
             
             if (ch_group->homekit_enabled) {
                 new_hk_ch_calloc(accessory, service, calloc_count, json_context);
@@ -11956,23 +12001,10 @@ void normal_mode_init() {
             if (is_custom_initial)  {
                 ch_group->ch[2]->value.float_value = custom_initial[1];
                 ch_group->ch[3]->value.float_value = custom_initial[2];
+                
             } else {
                 ch_group->ch[2]->value.float_value = set_initial_state(ch_group, 2, NULL, 5, CH_TYPE_FLOAT);
                 ch_group->ch[3]->value.float_value = set_initial_state(ch_group, 3, NULL, 5, CH_TYPE_FLOAT);
-            }
-            
-            if (ch_group->ch[4]) {  // With FX
-                for (unsigned int s = 4; s <= 9; s++) {
-                    ch_group->ch[s]->value.int_value = set_initial_state(ch_group, s, NULL, 5, CH_TYPE_INT);
-                }
-                
-                lightbulb_group->lightbulb_fx_data->effect = ch_group->ch[4]->value.int_value;
-                set_fx_speed(lightbulb_group->lightbulb_fx_data, ch_group->ch[5]->value.int_value);
-                set_fx_reverse(lightbulb_group->lightbulb_fx_data, ch_group->ch[6]->value.int_value);
-                set_fx_size(lightbulb_group->lightbulb_fx_data, ch_group->ch[7]->value.int_value);
-                set_fx_color0(lightbulb_group);
-                lightbulb_group->lightbulb_fx_data->colors[1]= ch_group->ch[8]->value.int_value;
-                lightbulb_group->lightbulb_fx_data->colors[2]= ch_group->ch[9]->value.int_value;
             }
             
         } else if (LIGHTBULB_CHANNELS == 2) {
